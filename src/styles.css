@@ -35,8 +35,30 @@ body,
 
 body {
   margin: 0;
-  background: var(--paper);
   color: var(--ink);
+  background: #140d08;
+}
+
+/* ::before holds the photo, ::after the vignette; both sit behind the page */
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* background photo (music wall), blurred and darkened so the cassette stays in front */
+body::before {
+  inset: -24px;
+  background: url('/backgrounds/music-wall.webp') center / cover no-repeat;
+  filter: blur(6px) brightness(0.42) saturate(1.1);
+}
+
+/* vignette on top of the photo */
+body::after {
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 45%, transparent 30%, rgb(0 0 0 / 0.55) 100%);
 }
 
 .stage {
