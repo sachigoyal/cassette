@@ -15,7 +15,7 @@ export const Route = createRootRoute({
         content: 'width=device-width, initial-scale=1',
       },
       {
-        title: 'casset',
+        title: 'cassette',
       },
     ],
     links: [
@@ -23,7 +23,7 @@ export const Route = createRootRoute({
       { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossOrigin: 'anonymous' },
       {
         rel: 'stylesheet',
-        href: 'https://fonts.googleapis.com/css2?family=Caveat:wght@500&display=swap',
+        href: 'https://fonts.googleapis.com/css2?family=Caveat:wght@500&family=Special+Elite&display=swap',
       },
       {
         rel: 'stylesheet',

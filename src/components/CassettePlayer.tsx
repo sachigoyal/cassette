@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { YT_STATE, loadYouTubeApi, parseYouTubeId, type YTPlayer } from '#/lib/youtube'
+import { VideoMarquee } from '#/components/VideoMarquee'
 
 type Mode = 'stop' | 'play' | 'rew' | 'ff'
 
@@ -27,6 +28,21 @@ const EDGE_OPENINGS: [number, number][] = [
   [234, 16],
   [280, 26],
 ]
+
+// Uneven winding marks on the tape pack, so its rotation is visible.
+const rand = (i: number) => {
+  const x = Math.sin(i * 12.9898) * 43758.5453
+  // Math.sin can differ in the last digits between server and browser; round it off.
+  return Math.round((x - Math.floor(x)) * 1000) / 1000
+}
+const PACK_STREAKS = Array.from({ length: 14 }, (_, i) => ({
+  angle: rand(i + 1) * 360,
+  from: 0.35 + rand(i + 20) * 0.3,
+  to: 0.8 + rand(i + 40) * 0.18,
+  width: 0.6 + rand(i + 60) * 1.6,
+  light: rand(i + 80) > 0.45,
+}))
+const PACK_WOBBLES = [0.9, 0.76, 0.61, 0.5].map((f, i) => ({ f, dx: (rand(i + 100) - 0.5) * 3, dy: (rand(i + 120) - 0.5) * 3 }))
 
 // Tape length is conserved, so pack radius follows area, not position.
 const packRadius = (fill: number) =>
@@ -80,28 +96,37 @@ function Heart({ x, y, cell }: { x: number; y: number; cell: number }) {
   )
 }
 
+// Chrome cross-head screw.
 function Screw({ x, y, r = 5 }: { x: number; y: number; r?: number }) {
   return (
     <g transform={`translate(${x} ${y})`}>
-      <circle r={r} fill="var(--paper)" />
-      <path d={`M${-r * 0.55} 0 H${r * 0.55} M0 ${-r * 0.55} V${r * 0.55}`} strokeWidth={1} />
+      <circle r={r + 0.8} fill="#0a0a0b" stroke="none" />
+      <circle r={r} fill="url(#metal)" stroke="#3a3a3c" strokeWidth={0.5} />
+      <path
+        d={`M${-r * 0.6} 0 H${r * 0.6} M0 ${-r * 0.6} V${r * 0.6}`}
+        stroke="#2c2c2e"
+        strokeWidth={1.3}
+        strokeLinecap="round"
+      />
     </g>
   )
 }
 
-// Hub hole in the shell; the hub has a ring of slots and a toothed drive hole.
+// White plastic hub in its hole in the shell; slots ring the rim, teeth grip the spindle.
 function Hub({ at, reel }: { at: { x: number; y: number }; reel: React.RefObject<SVGGElement | null> }) {
   return (
-    <g transform={`translate(${at.x} ${at.y})`}>
-      <circle r={26} fill="var(--paper)" strokeWidth={1.3} />
+    <g transform={`translate(${at.x} ${at.y})`} stroke="none">
+      <circle r={26} fill="#070708" />
+      <circle r={25.2} fill="none" stroke="#000" strokeWidth={1.6} opacity={0.8} />
       <g ref={reel}>
-        <circle r={22} strokeWidth={1.2} />
+        <circle r={22} fill="url(#hub-plastic)" />
+        <circle r={21.4} fill="none" stroke="#ffffff" strokeWidth={0.6} opacity={0.7} />
         {Array.from({ length: 12 }, (_, i) => (
-          <rect key={i} x={-1.6} y={-19} width={3.2} height={4.5} rx={0.8} fill="var(--ink)" stroke="none" transform={`rotate(${i * 30})`} />
+          <rect key={i} x={-1.5} y={-19} width={3} height={4.5} rx={1} fill="#4a4a4d" transform={`rotate(${i * 30})`} />
         ))}
-        <circle r={11.5} strokeWidth={1.2} />
+        <circle r={11.5} fill="#121214" />
         {Array.from({ length: 6 }, (_, i) => (
-          <path key={i} d="M-2 -11.5 V-7.5 H2 V-11.5" fill="var(--ink)" strokeWidth={0.8} transform={`rotate(${i * 60 + 30})`} />
+          <rect key={i} x={-2} y={-11.8} width={4} height={4.3} rx={0.6} fill="#e9e9e5" transform={`rotate(${i * 60 + 30})`} />
         ))}
       </g>
     </g>
@@ -123,10 +148,12 @@ export function CassettePlayer() {
   const [mode, setMode] = useState<Mode>('stop')
   const [title, setTitle] = useState<string | null>(null)
   const [source, setSource] = useState<'file' | 'yt' | null>(null)
+  const [ytId, setYtId] = useState<string | null>(null)
   const [volume, setVolume] = useState(8) // 0–10 steps
   const volumeRef = useRef(8)
   volumeRef.current = volume
   const [linkError, setLinkError] = useState(false)
+  const [draft, setDraft] = useState<string | null>(null) // label text while editing
 
   const audioRef = useRef<HTMLAudioElement>(null)
   const ytRef = useRef<YTPlayer | null>(null)
@@ -136,8 +163,10 @@ export function CassettePlayer() {
 
   const leftReel = useRef<SVGGElement>(null)
   const rightReel = useRef<SVGGElement>(null)
-  const leftPack = useRef<SVGCircleElement>(null)
-  const rightPack = useRef<SVGCircleElement>(null)
+  const leftPack = useRef<SVGGElement>(null)
+  const rightPack = useRef<SVGGElement>(null)
+  const leftPackSpin = useRef<SVGGElement>(null)
+  const rightPackSpin = useRef<SVGGElement>(null)
 
   const pos = useRef(0)
   const angle = useRef({ l: 0, r: 0 })
@@ -155,10 +184,12 @@ export function CassettePlayer() {
     const p = Math.min(1, Math.max(0, pos.current / duration()))
     const rl = packRadius(1 - p)
     const rr = packRadius(p)
-    leftPack.current?.setAttribute('r', String(rl))
-    rightPack.current?.setAttribute('r', String(rr))
+    leftPack.current?.setAttribute('transform', `translate(${HUB_L.x} ${HUB_L.y}) scale(${rl / R_MAX})`)
+    rightPack.current?.setAttribute('transform', `translate(${HUB_R.x} ${HUB_R.y}) scale(${rr / R_MAX})`)
     leftReel.current?.setAttribute('transform', `rotate(${angle.current.l})`)
     rightReel.current?.setAttribute('transform', `rotate(${angle.current.r})`)
+    leftPackSpin.current?.setAttribute('transform', `rotate(${angle.current.l})`)
+    rightPackSpin.current?.setAttribute('transform', `rotate(${angle.current.r})`)
     return { rl, rr }
   }, [source])
 
@@ -264,6 +295,7 @@ export function CassettePlayer() {
     ytRef.current?.stopVideo?.()
     if (audioRef.current) audioRef.current.src = url
     setSource('file')
+    setYtId(null)
     setTitle(file.name.replace(/\.[^.]+$/, ''))
   }
 
@@ -273,6 +305,7 @@ export function CassettePlayer() {
     pos.current = 0
     audioRef.current?.pause()
     setSource('yt')
+    setYtId(videoId)
     setTitle('loading…')
     const YT = await loadYouTubeApi()
     if (ytRef.current) {
@@ -334,25 +367,7 @@ export function CassettePlayer() {
 
   return (
     <div className="flex w-full flex-col items-center gap-14">
-      <input
-        className="link-input"
-        type="url"
-        placeholder="paste a YouTube link"
-        aria-label="YouTube link"
-        aria-invalid={linkError}
-        onChange={(e) => {
-          const v = e.currentTarget.value
-          if (!v) setLinkError(false)
-          else if (parseYouTubeId(v)) {
-            tryLink(v)
-            e.currentTarget.value = ''
-          }
-        }}
-        onKeyDown={(e) => {
-          if (e.key !== 'Enter') return
-          if (tryLink(e.currentTarget.value)) e.currentTarget.value = ''
-        }}
-      />
+      <VideoMarquee activeId={ytId} onPick={(id) => void loadYouTube(id)} />
 
       <div className="stage">
           <svg
@@ -368,84 +383,278 @@ export function CassettePlayer() {
             aria-label="Cassette tape — click to load a track"
           >
             <defs>
-              <linearGradient id="edge-shade" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0" stopColor="var(--edge-light)" />
-                <stop offset="1" stopColor="var(--edge-dark)" />
+              {/* black plastic shell */}
+              <linearGradient id="shell" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stopColor="#35353b" />
+                <stop offset="0.45" stopColor="#202024" />
+                <stop offset="1" stopColor="#151517" />
               </linearGradient>
+              <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stopColor="#fff" stopOpacity={0.12} />
+                <stop offset="0.35" stopColor="#fff" stopOpacity={0.03} />
+                <stop offset="0.5" stopColor="#fff" stopOpacity={0} />
+              </linearGradient>
+              <pattern id="ribs" width={4} height={2.4} patternUnits="userSpaceOnUse">
+                <rect width={4} height={1} fill="#fff" opacity={0.025} />
+              </pattern>
+              <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stopColor="#2c2c31" />
+                <stop offset="1" stopColor="#141417" />
+              </linearGradient>
+              <linearGradient id="lower" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stopColor="#46464d" />
+                <stop offset="1" stopColor="#2c2c32" />
+              </linearGradient>
+
+              {/* cream paper label with a little grain */}
+              <linearGradient id="paper" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stopColor="#f8f1e2" />
+                <stop offset="1" stopColor="#ece0c7" />
+              </linearGradient>
+              <filter id="grain" x="0" y="0" width="100%" height="100%">
+                <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves={2} stitchTiles="stitch" />
+                <feColorMatrix values="0 0 0 0 0.35  0 0 0 0 0.28  0 0 0 0 0.2  0 0 0 0.09 0" />
+                <feComposite in2="SourceGraphic" operator="in" />
+              </filter>
+
+              {/* reel window: smoked clear plastic */}
+              <linearGradient id="smoke" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stopColor="#1b1b1f" />
+                <stop offset="1" stopColor="#0c0c0e" />
+              </linearGradient>
+              <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stopColor="#fff" stopOpacity={0.22} />
+                <stop offset="0.3" stopColor="#fff" stopOpacity={0.06} />
+                <stop offset="0.31" stopColor="#fff" stopOpacity={0} />
+              </linearGradient>
+              <radialGradient id="tape-pack" cx="0.5" cy="0.5" r="0.5">
+                <stop offset="0.2" stopColor="#2f1f15" />
+                <stop offset="0.75" stopColor="#4a3121" />
+                <stop offset="0.95" stopColor="#6a4a32" />
+                <stop offset="1" stopColor="#3a2518" />
+              </radialGradient>
+              {/* light catching the wound tape */}
+              <linearGradient id="pack-sheen" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stopColor="#fff" stopOpacity={0.18} />
+                <stop offset="0.45" stopColor="#fff" stopOpacity={0} />
+                <stop offset="1" stopColor="#000" stopOpacity={0.25} />
+              </linearGradient>
+              {/* translucent slip sheet behind the tape */}
+              <linearGradient id="slip" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stopColor="#56565c" />
+                <stop offset="1" stopColor="#2e2e33" />
+              </linearGradient>
+              <radialGradient id="hub-plastic" cx="0.38" cy="0.32" r="0.75">
+                <stop offset="0" stopColor="#ffffff" />
+                <stop offset="0.7" stopColor="#eceae4" />
+                <stop offset="1" stopColor="#c9c7c0" />
+              </radialGradient>
+              <radialGradient id="metal" cx="0.35" cy="0.3" r="0.8">
+                <stop offset="0" stopColor="#ffffff" />
+                <stop offset="0.45" stopColor="#c9c9cc" />
+                <stop offset="1" stopColor="#7c7c80" />
+              </radialGradient>
+              <radialGradient id="roller" cx="0.4" cy="0.35" r="0.7">
+                <stop offset="0" stopColor="#ffffff" />
+                <stop offset="1" stopColor="#bdbbb4" />
+              </radialGradient>
+
               <clipPath id="tape-window">
                 <rect x={TAPE_WIN.x} y={TAPE_WIN.y} width={TAPE_WIN.w} height={TAPE_WIN.h} rx={2} />
               </clipPath>
+              <clipPath id="label-clip">
+                <rect x={28} y={22} width={344} height={152} rx={5} />
+              </clipPath>
             </defs>
 
-            {/* thickness: the shell's outline pushed down, so its corners stay round */}
-            <rect x={0.9} y={0.9 + EDGE} width={W - 1.8} height={H - 1.8} rx={7} fill="url(#edge-shade)" strokeWidth={1.6} />
-            <line x1={10} x2={84} y1={H + EDGE / 2} y2={H + EDGE / 2} stroke="var(--seam)" strokeWidth={0.8} />
-            <line x1={316} x2={W - 10} y1={H + EDGE / 2} y2={H + EDGE / 2} stroke="var(--seam)" strokeWidth={0.8} />
+            {/* thickness */}
+            <rect x={0.5} y={0.5 + EDGE} width={W - 1} height={H - 1} rx={7} fill="url(#edge)" stroke="#000" strokeWidth={1} />
+            <line x1={10} x2={84} y1={H + EDGE / 2} y2={H + EDGE / 2} stroke="#000" strokeWidth={0.8} opacity={0.6} />
+            <line x1={316} x2={W - 10} y1={H + EDGE / 2} y2={H + EDGE / 2} stroke="#000" strokeWidth={0.8} opacity={0.6} />
+            <line x1={10} x2={84} y1={H + EDGE / 2 + 1} y2={H + EDGE / 2 + 1} stroke="#fff" strokeWidth={0.5} opacity={0.09} />
+            <line x1={316} x2={W - 10} y1={H + EDGE / 2 + 1} y2={H + EDGE / 2 + 1} stroke="#fff" strokeWidth={0.5} opacity={0.09} />
             {EDGE_OPENINGS.map(([x, w]) => (
-              <g key={x}>
-                <rect x={x} y={H + 2.5} width={w} height={EDGE - 6} rx={1.2} fill="var(--edge-deep)" strokeWidth={0.9} />
-                <line x1={x + 1.5} x2={x + w - 1.5} y1={H + EDGE / 2 - 1} y2={H + EDGE / 2 - 1} stroke="var(--tape-line)" strokeWidth={1.3} />
+              <g key={x} stroke="none">
+                <rect x={x} y={H + 3} width={w} height={EDGE - 7} rx={1.2} fill="#050506" />
+                <rect x={x + 1.5} y={H + EDGE / 2 - 1.4} width={w - 3} height={1.8} fill="#5e412d" opacity={0.8} />
+                {/* light catching the lower lip of each opening */}
+                <rect x={x + 0.5} y={H + EDGE - 4.3} width={w - 1} height={0.7} fill="#fff" opacity={0.14} />
               </g>
             ))}
 
+            {/* light catching the edge just under the face */}
+            <line x1={6} x2={W - 6} y1={H + 1.2} y2={H + 1.2} stroke="#fff" strokeWidth={0.8} opacity={0.16} />
+
             {/* shell */}
-            <rect x={0.9} y={0.9} width={W - 1.8} height={H - 1.8} rx={7} fill="var(--paper)" strokeWidth={1.8} />
-            <rect x={8} y={8} width={W - 16} height={H - 16} rx={6} strokeWidth={0.8} />
+            <rect x={0.5} y={0.5} width={W - 1} height={H - 1} rx={7} fill="url(#shell)" stroke="#000" strokeWidth={1} />
+            <rect x={0.5} y={0.5} width={W - 1} height={H - 1} rx={7} fill="url(#ribs)" stroke="none" />
+            <rect x={0.5} y={0.5} width={W - 1} height={H - 1} rx={7} fill="url(#sheen)" stroke="none" />
+            <rect x={1.5} y={1.5} width={W - 3} height={H - 3} rx={6} stroke="#fff" strokeWidth={0.6} opacity={0.14} />
+            <rect x={8} y={8} width={W - 16} height={H - 16} rx={5} stroke="#000" strokeWidth={0.9} opacity={0.7} />
+            <rect x={8.8} y={8.8} width={W - 17.6} height={H - 17.6} rx={5} stroke="#fff" strokeWidth={0.5} opacity={0.07} />
             <Screw x={17} y={17} />
             <Screw x={383} y={17} />
             <Screw x={17} y={239} />
             <Screw x={383} y={239} />
 
             {/* label */}
-            <rect x={28} y={22} width={344} height={152} rx={5} fill="var(--paper)" strokeWidth={1.3} />
-            {[32, 37, 42].map((y) => (
-              <line key={y} x1={38} x2={362} y1={y} y2={y} strokeWidth={0.9} />
-            ))}
-            <rect x={38} y={49} width={17} height={19} rx={2} strokeWidth={1} />
+            <rect x={28} y={23.2} width={344} height={152} rx={5} fill="#000" opacity={0.45} stroke="none" />
+            <g clipPath="url(#label-clip)" stroke="none">
+              <rect x={28} y={22} width={344} height={152} fill="url(#paper)" />
+              <rect x={28} y={22} width={344} height={152} fill="#fff" filter="url(#grain)" />
+              <rect x={28} y={29} width={344} height={4.5} fill="var(--stripe-1)" />
+              <rect x={28} y={33.5} width={344} height={4.5} fill="var(--stripe-2)" />
+              <rect x={28} y={38} width={344} height={4.5} fill="var(--stripe-3)" />
+            </g>
+            <rect x={38} y={49} width={17} height={19} rx={2} stroke="#2a2a2a" strokeWidth={1} />
             <text x={46.5} y={63} className="side" textAnchor="middle">A</text>
-            <line x1={62} x2={362} y1={67} y2={67} strokeWidth={0.9} />
-            {title && (
-              <text x={66} y={63} className="hand">
-                {title.length > 40 ? `${title.slice(0, 39)}…` : title}
-              </text>
-            )}
+            <line x1={62} x2={362} y1={67} y2={67} stroke="#8c7f69" strokeWidth={0.8} />
+            {/* the label's pen line doubles as the link input */}
+            <foreignObject x={62} y={45} width={300} height={24} onClick={(e) => e.stopPropagation()}>
+              <input
+                className="label-input"
+                type="text"
+                spellCheck={false}
+                aria-label="YouTube link"
+                aria-invalid={linkError}
+                value={draft ?? title ?? ''}
+                onFocus={(e) => {
+                  setDraft('')
+                  setLinkError(false)
+                  e.currentTarget.select()
+                }}
+                onBlur={() => {
+                  setDraft(null)
+                  setLinkError(false)
+                }}
+                onChange={(e) => {
+                  const v = e.currentTarget.value
+                  setDraft(v)
+                  setLinkError(false)
+                  if (parseYouTubeId(v) && tryLink(v)) e.currentTarget.blur()
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') e.currentTarget.blur()
+                  if (e.key === 'Enter' && tryLink(e.currentTarget.value)) e.currentTarget.blur()
+                }}
+              />
+            </foreignObject>
 
             {/* hearts */}
             {[0, 1, 2].map((i) => (
               <Heart key={i} x={W / 2 - 27 + i * 19} y={151} cell={1.45} />
             ))}
 
-            {/* reel strip: two identical hubs, tape window between */}
-            <rect x={72} y={78} width={256} height={64} rx={32} fill="var(--paper)" strokeWidth={1.3} />
-            <rect x={TAPE_WIN.x} y={TAPE_WIN.y} width={TAPE_WIN.w} height={TAPE_WIN.h} rx={2} fill="var(--tape-bg)" stroke="none" />
-            <g clipPath="url(#tape-window)">
-              <circle ref={leftPack} cx={HUB_L.x} cy={HUB_L.y} r={R_MAX} fill="var(--tape)" strokeWidth={0.9} />
-              <circle ref={rightPack} cx={HUB_R.x} cy={HUB_R.y} r={R_MIN} fill="var(--tape)" strokeWidth={0.9} />
+            {/* reel window: smoked plastic, hubs, tape seen through the centre */}
+            <rect x={72} y={78} width={256} height={64} rx={32} fill="url(#smoke)" stroke="#000" strokeWidth={1.2} />
+            {/* centre window: slip sheet, wound tape, printed scale, glass */}
+            <rect x={TAPE_WIN.x - 1.5} y={TAPE_WIN.y - 1.5} width={TAPE_WIN.w + 3} height={TAPE_WIN.h + 3} rx={3} fill="#050506" stroke="none" />
+            <g clipPath="url(#tape-window)" stroke="none">
+              <rect x={TAPE_WIN.x} y={TAPE_WIN.y} width={TAPE_WIN.w} height={TAPE_WIN.h} fill="url(#slip)" />
+              {[leftPack, rightPack].map((ref, i) => (
+                <g
+                  key={i}
+                  ref={ref}
+                  transform={`translate(${(i ? HUB_R : HUB_L).x} ${HUB_L.y}) scale(${i ? R_MIN / R_MAX : 1})`}
+                >
+                  <circle r={R_MAX} fill="url(#tape-pack)" />
+                  {[0.94, 0.87, 0.8, 0.72, 0.63, 0.54, 0.45].map((f) => (
+                    <circle key={f} r={R_MAX * f} fill="none" stroke="#8a6445" strokeWidth={0.6} opacity={0.28} />
+                  ))}
+                  {/* uneven winding that turns with the reel */}
+                  <g ref={i ? rightPackSpin : leftPackSpin}>
+                    {PACK_WOBBLES.map(({ f, dx, dy }) => (
+                      <circle key={f} cx={dx} cy={dy} r={R_MAX * f} fill="none" stroke="#1c120b" strokeWidth={1.4} opacity={0.35} />
+                    ))}
+                    {PACK_STREAKS.map((k, j) => (
+                      <line
+                        key={j}
+                        x1={0}
+                        y1={-R_MAX * k.from}
+                        x2={0}
+                        y2={-R_MAX * k.to}
+                        stroke={k.light ? '#c99a6c' : '#140c07'}
+                        strokeWidth={k.width}
+                        opacity={k.light ? 0.3 : 0.4}
+                        transform={`rotate(${k.angle})`}
+                      />
+                    ))}
+                  </g>
+                  <circle r={R_MAX - 0.7} fill="none" stroke="#a57a55" strokeWidth={1.2} opacity={0.85} />
+                  <circle r={R_MAX} fill="url(#pack-sheen)" />
+                </g>
+              ))}
+              {/* inner shadow along the top of the opening */}
+              <rect x={TAPE_WIN.x} y={TAPE_WIN.y} width={TAPE_WIN.w} height={3} fill="#000" opacity={0.45} />
+              {/* scale printed on the window */}
+              <line x1={TAPE_WIN.x + 10} x2={TAPE_WIN.x + TAPE_WIN.w - 10} y1={TAPE_WIN.y + TAPE_WIN.h - 4} y2={TAPE_WIN.y + TAPE_WIN.h - 4} stroke="#f3efe4" strokeWidth={0.6} opacity={0.85} />
               <path
-                d={Array.from({ length: 5 }, (_, i) => `M${188 + i * 6} ${TAPE_WIN.y + TAPE_WIN.h} v${i % 2 ? -3 : -5}`).join(' ')}
-                strokeWidth={0.7}
+                d={Array.from({ length: 11 }, (_, i) => {
+                  const x = TAPE_WIN.x + 10 + (i * (TAPE_WIN.w - 20)) / 10
+                  return `M${x} ${TAPE_WIN.y + TAPE_WIN.h - 4} v${i % 5 === 0 ? -5 : -2.6}`
+                }).join(' ')}
+                stroke="#f3efe4"
+                strokeWidth={0.6}
+                opacity={0.85}
+              />
+              {/* glass reflections */}
+              <path
+                d={`M${TAPE_WIN.x + 12} ${TAPE_WIN.y} h14 l-12 ${TAPE_WIN.h} h-14 Z`}
+                fill="#fff"
+                opacity={0.1}
+              />
+              <path
+                d={`M${TAPE_WIN.x + 30} ${TAPE_WIN.y} h4 l-12 ${TAPE_WIN.h} h-4 Z`}
+                fill="#fff"
+                opacity={0.08}
               />
             </g>
-            <rect x={TAPE_WIN.x} y={TAPE_WIN.y} width={TAPE_WIN.w} height={TAPE_WIN.h} rx={2} strokeWidth={1.3} />
+            {/* bevelled frame */}
+            <rect x={TAPE_WIN.x} y={TAPE_WIN.y} width={TAPE_WIN.w} height={TAPE_WIN.h} rx={2} stroke="#000" strokeWidth={1.1} />
+            <path
+              d={`M${TAPE_WIN.x - 1.6} ${TAPE_WIN.y + TAPE_WIN.h + 1.8} H${TAPE_WIN.x + TAPE_WIN.w + 1.6}`}
+              stroke="#fff"
+              strokeWidth={0.6}
+              opacity={0.16}
+            />
             <Hub at={HUB_L} reel={leftReel} />
             <Hub at={HUB_R} reel={rightReel} />
+            <rect x={72} y={78} width={256} height={64} rx={32} fill="url(#glass)" stroke="none" />
+            <rect x={73} y={79} width={254} height={62} rx={31} stroke="#fff" strokeWidth={0.6} opacity={0.12} />
 
-            {/* head opening */}
-            <path d="M84 256 L102 194 L298 194 L316 256" fill="var(--paper)" strokeWidth={1.4} />
-            <line x1={84} x2={316} y1={H - 0.9} y2={H - 0.9} strokeWidth={1.8} />
+            {/* head opening: a lighter moulded panel, lit along its top and sides */}
+            <path d="M84 256 L102 194 L298 194 L316 256 Z" fill="url(#lower)" stroke="#000" strokeWidth={1} />
+            <path d="M102.8 195 H297.2" stroke="#fff" strokeWidth={0.9} opacity={0.28} />
+            <path d="M85.5 255 L103 195.5 M314.5 255 L297 195.5" stroke="#fff" strokeWidth={0.7} opacity={0.14} />
             <Screw x={200} y={207} />
-            <circle cx={130} cy={234} r={6.5} strokeWidth={1.2} />
-            <circle cx={270} cy={234} r={6.5} strokeWidth={1.2} />
-            <rect x={153} y={228} width={10} height={10} rx={1.5} strokeWidth={1.2} />
-            <rect x={237} y={228} width={10} height={10} rx={1.5} strokeWidth={1.2} />
-            <rect x={185} y={224} width={30} height={13} rx={2} strokeWidth={1.2} />
+            {/* holes: dark opening, shadowed top, lit lower rim */}
+            <g stroke="none">
+              {[130, 270].map((cx) => (
+                <g key={cx}>
+                  <circle cx={cx} cy={234.6} r={7.2} fill="#fff" opacity={0.18} />
+                  <circle cx={cx} cy={234} r={7} fill="#000" />
+                  <circle cx={cx} cy={234.8} r={5.4} fill="#141416" />
+                </g>
+              ))}
+              {[
+                [153, 228, 10, 10],
+                [237, 228, 10, 10],
+                [185, 224, 30, 13],
+              ].map(([x, y, w, h]) => (
+                <g key={x}>
+                  <rect x={x - 0.3} y={y + 0.7} width={w + 0.6} height={h} rx={2} fill="#fff" opacity={0.18} />
+                  <rect x={x} y={y} width={w} height={h} rx={1.8} fill="#000" />
+                  <rect x={x + 1.4} y={y + 1.8} width={w - 2.8} height={h - 2.8} rx={1} fill="#141416" />
+                </g>
+              ))}
+            </g>
 
             {/* tape guide rollers either side of the opening */}
             {[50, 350].map((cx) => (
-              <g key={cx}>
-                <circle cx={cx} cy={226} r={10} fill="var(--paper)" strokeWidth={1.3} />
-                <circle cx={cx} cy={226} r={6} strokeWidth={1} />
-                <circle cx={cx} cy={226} r={2} fill="var(--ink)" stroke="none" />
+              <g key={cx} stroke="none">
+                <circle cx={cx} cy={226} r={10.5} fill="#070708" />
+                <circle cx={cx} cy={226} r={7} fill="url(#roller)" />
+                <circle cx={cx} cy={226} r={2.4} fill="url(#metal)" stroke="#555" strokeWidth={0.4} />
               </g>
             ))}
           </svg>
@@ -477,7 +686,14 @@ export function CassettePlayer() {
         </button>
         <div className="vol-meter" role="meter" aria-label="Volume" aria-valuemin={0} aria-valuemax={10} aria-valuenow={volume}>
           {Array.from({ length: 10 }, (_, i) => (
-            <span key={i} className={i < volume ? 'on' : ''} style={{ height: `${8 + i * 2.2}px` }} />
+            <span
+              key={i}
+              className={i < volume ? 'on' : ''}
+              style={{
+                height: `${8 + i * 2.2}px`,
+                '--led': i < 6 ? 'var(--led-green)' : i < 8 ? 'var(--led-amber)' : 'var(--led-red)',
+              } as React.CSSProperties}
+            />
           ))}
         </div>
         <button type="button" className="key key-small" onClick={() => nudgeVolume(1)} aria-label="Volume up" title="Volume up">

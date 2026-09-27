@@ -8,6 +8,12 @@
   --edge-dark: #d3d2cc;
   --deck: #efeeea;
   --heart: #e3262e;
+  --led-green: #63e06a;
+  --led-amber: #ffb433;
+  --led-red: #ff4d3d;
+  --stripe-1: #f2a33a;
+  --stripe-2: #e8622c;
+  --stripe-3: #c9352c;
   --heart-shade: #a3151b;
   --tape-line: #4a4642;
   --edge-deep: #c9c8c2;
@@ -51,130 +57,150 @@ body {
   bottom: 14px;
   height: 36px;
   border-radius: 50%;
-  background: radial-gradient(closest-side, rgb(0 0 0 / 0.22), transparent);
+  background: radial-gradient(closest-side, rgb(0 0 0 / 0.38), transparent);
   filter: blur(6px);
   pointer-events: none;
-}
-
-.hand {
-  font-family: 'Caveat', cursive;
-  font-size: 19px;
-  fill: var(--ink);
-  stroke: none;
 }
 
 .side {
   font-family: ui-sans-serif, system-ui, sans-serif;
   font-size: 13px;
   font-weight: 700;
-  fill: var(--ink);
+  fill: #2a2a2a;
   stroke: none;
 }
 
-/* transport: piano keys set into a recessed housing; latched keys stay down */
+/* transport: a dark deck housing with brushed-aluminium piano keys */
 .deck {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 16px 16px 12px;
-  background: var(--deck);
-  border: 1.5px solid var(--ink);
+  gap: 7px;
+  padding: 12px 14px 15px;
+  background: linear-gradient(#2d2d33, #17171a);
+  border: 1px solid #000;
   border-radius: 14px;
   box-shadow:
-    inset 0 2px 4px rgb(0 0 0 / 0.08),
-    0 1px 0 rgb(255 255 255 / 0.9),
-    0 12px 24px -16px rgb(0 0 0 / 0.35);
+    inset 0 1px 0 rgb(255 255 255 / 0.13),
+    inset 0 -1px 0 rgb(0 0 0 / 0.6),
+    0 16px 28px -14px rgb(0 0 0 / 0.55);
 }
 
-/* flat keys with a hard offset shadow; hover leans in, pressed sits flat */
 .key {
+  position: relative;
   display: grid;
   place-items: center;
   width: 58px;
-  height: 50px;
-  color: var(--ink);
-  background: #ffffff;
-  border: 2px solid var(--ink);
-  border-radius: 12px;
-  box-shadow: 4px 4px 0 var(--ink);
+  height: 48px;
+  color: #2a2a2e;
+  background:
+    repeating-linear-gradient(90deg, rgb(255 255 255 / 0.14) 0 1px, rgb(0 0 0 / 0.035) 1px 2px),
+    linear-gradient(#f6f6f7 0%, #dcdce0 46%, #c7c7cc 54%, #e4e4e7 100%);
+  border: 1px solid #0b0b0c;
+  border-radius: 6px;
+  box-shadow:
+    inset 0 1px 0 #ffffff,
+    inset 0 -2px 0 rgb(0 0 0 / 0.16),
+    0 4px 0 #75757c,
+    0 5px 0 #0b0b0c,
+    0 9px 10px rgb(0 0 0 / 0.5);
   cursor: pointer;
   transition:
-    transform 90ms ease,
-    box-shadow 90ms ease,
-    background 90ms ease;
+    transform 70ms ease,
+    box-shadow 70ms ease,
+    filter 120ms ease;
+}
+
+/* engraved icon: dark, with a light edge underneath */
+.key svg {
+  filter: drop-shadow(0 1px 0 rgb(255 255 255 / 0.75));
 }
 
 .key:hover {
-  background: #efefec;
-  transform: translate(2px, 2px);
-  box-shadow: 2px 2px 0 var(--ink);
+  filter: brightness(1.05);
 }
 
 .key:active,
 .key.is-down {
-  background: #e6e5e1;
-  transform: translate(4px, 4px);
-  box-shadow: 0 0 0 var(--ink);
+  transform: translateY(4px);
+  background:
+    repeating-linear-gradient(90deg, rgb(255 255 255 / 0.1) 0 1px, rgb(0 0 0 / 0.04) 1px 2px),
+    linear-gradient(#dedee2 0%, #c9c9ce 50%, #d6d6da 100%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.6),
+    inset 0 2px 5px rgb(0 0 0 / 0.22),
+    0 0 0 #75757c,
+    0 1px 0 #0b0b0c,
+    0 2px 3px rgb(0 0 0 / 0.45);
+}
+
+/* latched keys light a small amber LED */
+.key.is-down::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--led-amber);
+  box-shadow: 0 0 6px 1px var(--led-amber);
 }
 
 .key-small {
   width: 46px;
 }
 
-/* ten bars, rising like a volume wedge */
+/* LED level meter set into a dark window */
 .vol-meter {
   display: flex;
   align-items: flex-end;
   gap: 3px;
-  height: 30px;
-  padding: 0 6px;
+  height: 36px;
+  padding: 5px 8px;
+  margin: 0 4px;
   align-self: center;
+  background: #070708;
+  border-radius: 5px;
+  box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.8), 0 1px 0 rgb(255 255 255 / 0.1);
 }
 
 .vol-meter span {
   width: 5px;
-  border: 1.2px solid var(--ink);
   border-radius: 1px;
-  background: var(--paper);
-  transition: background 90ms ease;
+  background: #242427;
+  transition: background 90ms ease, box-shadow 90ms ease;
 }
 
 .vol-meter span.on {
-  background: var(--ink);
+  background: var(--led);
+  box-shadow: 0 0 5px var(--led);
 }
 
 .key:focus-visible {
-  outline: 2px dashed var(--ink);
-  outline-offset: 5px;
-}
-
-/* link input, drawn like the deck */
-.link-input {
-  width: min(324px, 100%);
-  height: 42px;
-  margin-bottom: -40px;
-  padding: 0 14px;
-  font: inherit;
-  font-size: 14px;
-  text-align: center;
-  color: var(--ink);
-  background: var(--deck);
-  border: 1.5px solid var(--ink);
-  border-radius: 10px;
-  box-shadow: inset 0 2px 0 rgb(0 0 0 / 0.06);
-}
-
-.link-input::placeholder {
-  color: #8a8a86;
-}
-
-.link-input:focus-visible {
-  outline: 2px dashed var(--ink);
+  outline: 2px solid var(--led-amber);
   outline-offset: 4px;
 }
 
-.link-input[aria-invalid='true'] {
-  border-color: var(--heart);
+/* link input, written on the cassette label's pen line */
+.label-input {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0 4px;
+  font-family: 'Caveat', cursive;
+  font-size: 19px;
+  line-height: 24px;
+  color: #1f2d6b;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  outline: none;
+  text-overflow: ellipsis;
+  cursor: text;
+}
+
+.label-input[aria-invalid='true'] {
+  color: #b3261e;
 }
 
 /* the YouTube player is kept off-screen; only its audio is used */
@@ -187,3 +213,212 @@ body {
   pointer-events: none;
 }
 
+
+/* side columns of music videos, drifting up (left) and down (right) */
+.marquee {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 230px;
+  overflow: hidden;
+  mask-image: linear-gradient(transparent, #000 14%, #000 86%, transparent);
+  z-index: 1;
+}
+
+.marquee.is-left {
+  left: max(24px, calc(50% - 620px));
+}
+
+.marquee.is-right {
+  right: max(24px, calc(50% - 620px));
+}
+
+.marquee-track {
+  animation: marquee-up 70s linear infinite;
+}
+
+.marquee.is-right .marquee-track {
+  animation-name: marquee-down;
+}
+
+.marquee:hover .marquee-track,
+.marquee:focus-within .marquee-track {
+  animation-play-state: paused;
+}
+
+@keyframes marquee-up {
+  from { transform: translateY(0); }
+  to { transform: translateY(-50%); }
+}
+
+@keyframes marquee-down {
+  from { transform: translateY(-50%); }
+  to { transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track { animation: none; }
+}
+
+/* too narrow to sit beside the cassette */
+@media (max-width: 1180px) {
+  .marquee { display: none; }
+}
+
+/* scrapbook cards: aged paper, taped-on photo, handwritten title.
+   margin rather than gap, so each half of the marquee track is exactly equal */
+.jcard {
+  --tilt: -0.6deg;
+  display: block;
+  width: 100%;
+  margin-bottom: 14px;
+  padding: 0;
+  text-align: left;
+  color: var(--ink);
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.45 0 0 0 0 0.35 0 0 0 0 0.2 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    linear-gradient(170deg, #fbf3df, #f1e3c4);
+  border: 1px solid rgb(120 90 40 / 0.22);
+  border-radius: 3px;
+  box-shadow:
+    inset 0 0 22px rgb(140 100 40 / 0.14),
+    0 1px 1px rgb(60 40 10 / 0.12),
+    0 10px 18px -12px rgb(60 40 10 / 0.45);
+  transform: rotate(var(--tilt));
+  cursor: pointer;
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+/* each card sits a little differently, like it was placed by hand */
+.jcard:nth-child(3n + 2) { --tilt: 0.5deg; }
+.jcard:nth-child(3n) { --tilt: -0.2deg; }
+
+.jcard:hover {
+  transform: rotate(0deg) translateY(-3px);
+  box-shadow:
+    inset 0 0 22px rgb(140 100 40 / 0.14),
+    0 1px 1px rgb(60 40 10 / 0.12),
+    0 16px 24px -12px rgb(60 40 10 / 0.5);
+}
+
+.jcard:focus-visible {
+  outline: 2px solid var(--led-amber);
+  outline-offset: 3px;
+}
+
+.jcard-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 12px 11px 11px;
+}
+
+/* photo print: white border, faded colour, masking tape on top */
+.jcard-art {
+  position: relative;
+  flex: none;
+  padding: 3px 3px 4px;
+  background: #fdfaf2;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25), 0 3px 6px -3px rgb(0 0 0 / 0.3);
+  transform: rotate(-2deg);
+}
+
+.jcard-art::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  z-index: 1;
+  width: 28px;
+  height: 11px;
+  background: rgb(232 218 176 / 0.82);
+  box-shadow: 0 1px 1px rgb(0 0 0 / 0.08);
+  transform: translateX(-50%) rotate(5deg);
+}
+
+.jcard-photo {
+  position: relative;
+  display: block;
+  width: 50px;
+  height: 50px;
+  overflow: hidden;
+  background: #d9d0bd;
+}
+
+/* square crop of the 16:9 thumbnail; trims the corner badges too */
+.jcard-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scale(1.18);
+  filter: sepia(0.3) saturate(0.8) contrast(1.05);
+}
+
+.jcard-play {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgb(40 25 10 / 0.4);
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.jcard:hover .jcard-play {
+  opacity: 1;
+}
+
+.jcard-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.jcard-song {
+  font-family: 'Caveat', cursive;
+  font-size: 21px;
+  line-height: 1;
+  color: #1f2d6b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jcard-artist {
+  margin-top: 5px;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: 11.5px;
+  color: #6e5f45;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jcard-now {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-family: 'Special Elite', 'Courier New', monospace;
+  font-size: 10.5px;
+  color: #b06a12;
+}
+
+.jcard-now::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--led-amber);
+  box-shadow: 0 0 6px 1px var(--led-amber);
+}
+
+.jcard.is-active {
+  border-color: rgb(230 150 30 / 0.7);
+  box-shadow:
+    inset 0 0 22px rgb(140 100 40 / 0.14),
+    0 0 0 1.5px rgb(255 180 51 / 0.9),
+    0 12px 22px -12px rgb(255 150 30 / 0.55);
+}
