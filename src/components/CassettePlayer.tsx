@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { YT_STATE, loadYouTubeApi, parseYouTubeId, type YTPlayer } from '#/lib/youtube'
 
 type Mode = 'stop' | 'play' | 'rew' | 'ff'
 
@@ -14,16 +15,70 @@ const R_MIN = 17 // bare hub
 const R_MAX = 80 // full pack
 const TAPE_WIN = { x: 164, y: 94, w: 72, h: 32 }
 
-// Thickness is faked with stacked outlines behind the face.
-const LAYERS = 18
-const LAYER_GAP = 2 // px
 
-// Resting pose: straight on.
-const POSE = { x: 0, y: 0, z: 0 }
+// Seen from just below, the shell's 12 mm thickness shows as a strip under the face.
+const EDGE = 16
+
+// Where the tape is exposed along the bottom edge: [x, width].
+const EDGE_OPENINGS: [number, number][] = [
+  [94, 26],
+  [150, 16],
+  [182, 36],
+  [234, 16],
+  [280, 26],
+]
 
 // Tape length is conserved, so pack radius follows area, not position.
 const packRadius = (fill: number) =>
   Math.sqrt(R_MIN * R_MIN + (R_MAX * R_MAX - R_MIN * R_MIN) * fill)
+
+// Pixel heart, 11 × 10 cells. k outline, r red, d shade, w highlight.
+const HEART = [
+  '..kkk.kkk..',
+  '.krrrkrrrk.',
+  'krwwrrrrrrk',
+  'krwrrrrrrdk',
+  'krrrrrrrrdk',
+  '.krrrrrrdk.',
+  '..krrrrdk..',
+  '...krrdk...',
+  '....kdk....',
+  '.....k.....',
+]
+const HEART_COLORS: Record<string, string> = {
+  k: 'var(--ink)',
+  r: 'var(--heart)',
+  d: 'var(--heart-shade)',
+  w: '#ffffff',
+}
+const HEART_CELLS = HEART.flatMap((row, y) => [...row].map((c, x) => ({ x, y, c }))).filter((p) => p.c !== '.')
+const filled = new Set(HEART_CELLS.map(({ x, y }) => `${x},${y}`))
+// one-cell white border all round, like a sticker
+const HEART_HALO = [...new Set(
+  HEART_CELLS.flatMap(({ x, y }) =>
+    [-1, 0, 1].flatMap((dx) => [-1, 0, 1].map((dy) => `${x + dx},${y + dy}`)),
+  ),
+)].filter((k) => !filled.has(k)).map((k) => k.split(',').map(Number))
+
+function Heart({ x, y, cell }: { x: number; y: number; cell: number }) {
+  return (
+    <g transform={`translate(${x} ${y}) scale(${cell})`} stroke="none" shapeRendering="crispEdges">
+      {HEART_HALO.map(([hx, hy]) => (
+        <rect key={`h${hx},${hy}`} x={hx} y={hy} width={1.02} height={1.02} fill="#ffffff" />
+      ))}
+      {HEART_CELLS.map(({ x: cx, y: cy, c }) => (
+        <rect
+          key={`${cx},${cy}`}
+          x={cx}
+          y={cy}
+          width={1.02}
+          height={1.02}
+          fill={HEART_COLORS[c]}
+        />
+      ))}
+    </g>
+  )
+}
 
 function Screw({ x, y, r = 5 }: { x: number; y: number; r?: number }) {
   return (
@@ -60,14 +115,22 @@ const ICONS: Record<string, string> = {
   stop: 'M6.5 6.5 H17.5 V17.5 H6.5 Z',
   ff: 'M4 6 L12 12 L4 18 Z M13 6 L21 12 L13 18 Z',
   eject: 'M12 5 L19 13 H5 Z M5 16 H19 V19 H5 Z',
+  'vol-down': 'M3 9 H7 L12 5 V19 L7 15 H3 Z M15 11 H21 V13 H15 Z',
+  'vol-up': 'M3 9 H7 L12 5 V19 L7 15 H3 Z M15 11 H21 V13 H15 Z M17 9 H19 V15 H17 Z',
 }
 
 export function CassettePlayer() {
   const [mode, setMode] = useState<Mode>('stop')
   const [title, setTitle] = useState<string | null>(null)
-  const [tilt, setTilt] = useState({ x: 0, y: 0 })
+  const [source, setSource] = useState<'file' | 'yt' | null>(null)
+  const [volume, setVolume] = useState(8) // 0–10 steps
+  const volumeRef = useRef(8)
+  volumeRef.current = volume
+  const [linkError, setLinkError] = useState(false)
 
   const audioRef = useRef<HTMLAudioElement>(null)
+  const ytRef = useRef<YTPlayer | null>(null)
+  const ytHost = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const urlRef = useRef<string | null>(null)
 
@@ -82,8 +145,9 @@ export function CassettePlayer() {
   modeRef.current = mode
 
   const duration = () => {
-    const d = audioRef.current?.duration
-    return title && d && Number.isFinite(d) ? d : DEMO_DURATION
+    const d =
+      source === 'file' ? audioRef.current?.duration : source === 'yt' ? ytRef.current?.getDuration?.() : 0
+    return d && Number.isFinite(d) ? d : DEMO_DURATION
   }
 
   // Draw the current tape state straight to the DOM — no re-render per frame.
@@ -96,7 +160,7 @@ export function CassettePlayer() {
     leftReel.current?.setAttribute('transform', `rotate(${angle.current.l})`)
     rightReel.current?.setAttribute('transform', `rotate(${angle.current.r})`)
     return { rl, rr }
-  }, [title])
+  }, [source])
 
   useEffect(() => {
     let raf = 0
@@ -109,7 +173,8 @@ export function CassettePlayer() {
       const d = duration()
 
       if (m === 'play') {
-        if (title && audio) pos.current = audio.currentTime
+        if (source === 'file' && audio) pos.current = audio.currentTime
+        else if (source === 'yt' && ytRef.current?.getCurrentTime) pos.current = ytRef.current.getCurrentTime()
         else pos.current += dt
       } else if (m === 'ff' || m === 'rew') {
         pos.current += (m === 'ff' ? 1 : -1) * WIND_SPEED * dt * (d / 120)
@@ -134,27 +199,51 @@ export function CassettePlayer() {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [paint, title])
+  }, [paint, source])
 
-  // Keep the <audio> element in step with the transport.
+  // Keep whichever player is loaded in step with the transport.
   useEffect(() => {
-    const audio = audioRef.current
-    if (!audio || !title) return
-    if (mode === 'play') {
-      audio.currentTime = pos.current
-      audio.play().catch(() => setMode('stop'))
-    } else {
-      audio.pause()
-      if (mode === 'stop') audio.currentTime = pos.current
+    if (source === 'file') {
+      const audio = audioRef.current
+      if (!audio) return
+      if (mode === 'play') {
+        audio.currentTime = pos.current
+        audio.play().catch(() => setMode('stop'))
+      } else {
+        audio.pause()
+        if (mode === 'stop') audio.currentTime = pos.current
+      }
+    } else if (source === 'yt') {
+      const yt = ytRef.current
+      if (!yt?.playVideo) return
+      if (mode === 'play') {
+        yt.seekTo(pos.current, true)
+        yt.playVideo()
+      } else {
+        yt.pauseVideo()
+      }
     }
-  }, [mode, title])
+  }, [mode, source])
 
   const press = (m: Mode) => setMode((cur) => (cur === m ? 'stop' : m))
   const eject = () => fileRef.current?.click()
+  const nudgeVolume = (step: number) => setVolume((v) => Math.min(10, Math.max(0, v + step)))
+
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.volume = volume / 10
+    ytRef.current?.setVolume?.(volume * 10)
+  }, [volume])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLButtonElement) return
+      if (e.target instanceof HTMLInputElement) return
+      // arrows do nothing on a focused key, so volume works after clicking one
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault()
+        nudgeVolume(e.key === 'ArrowUp' ? 1 : -1)
+        return
+      }
+      if (e.target instanceof HTMLButtonElement) return
       const map: Record<string, Mode> = { ' ': 'play', ArrowLeft: 'rew', ArrowRight: 'ff', Escape: 'stop' }
       const m = map[e.key]
       if (!m) return
@@ -172,9 +261,68 @@ export function CassettePlayer() {
     urlRef.current = url
     setMode('stop')
     pos.current = 0
+    ytRef.current?.stopVideo?.()
     if (audioRef.current) audioRef.current.src = url
+    setSource('file')
     setTitle(file.name.replace(/\.[^.]+$/, ''))
   }
+
+  // The YouTube player plays off-screen, so only the audio comes through.
+  const loadYouTube = async (videoId: string) => {
+    setMode('stop')
+    pos.current = 0
+    audioRef.current?.pause()
+    setSource('yt')
+    setTitle('loading…')
+    const YT = await loadYouTubeApi()
+    if (ytRef.current) {
+      ytRef.current.cueVideoById(videoId)
+      return
+    }
+    // YT replaces the element it is given, so hand it one React does not own.
+    const el = document.createElement('div')
+    ytHost.current?.appendChild(el)
+    ytRef.current = new YT.Player(el, {
+      width: 356,
+      height: 200,
+      videoId,
+      playerVars: { playsinline: 1, rel: 0, controls: 0, modestbranding: 1 },
+      events: {
+        onReady: (e) => {
+          e.target.setVolume(volumeRef.current * 10)
+          setTitle(e.target.getVideoData().title || 'YouTube')
+        },
+        onStateChange: (e) => {
+          const t = e.target.getVideoData().title
+          if (t) setTitle(t)
+          // clicks on the video itself should move the keys too
+          if (e.data === YT_STATE.ended) setMode('stop')
+          else if (e.data === YT_STATE.playing && modeRef.current !== 'play') setMode('play')
+          else if (e.data === YT_STATE.paused && modeRef.current === 'play') setMode('stop')
+        },
+      },
+    })
+  }
+
+  const tryLink = (text: string) => {
+    const id = parseYouTubeId(text)
+    if (id) void loadYouTube(id)
+    setLinkError(!id)
+    return !!id
+  }
+
+  // Paste a YouTube link anywhere on the page.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (e.target instanceof HTMLInputElement) return
+      const id = parseYouTubeId(e.clipboardData?.getData('text') ?? '')
+      if (!id) return
+      e.preventDefault()
+      void loadYouTube(id)
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [])
 
   const buttons: { id: string; label: string; on: boolean; act: () => void }[] = [
     { id: 'rew', label: 'Rewind', on: mode === 'rew', act: () => press('rew') },
@@ -186,50 +334,30 @@ export function CassettePlayer() {
 
   return (
     <div className="flex w-full flex-col items-center gap-14">
-      <div
-        className="stage"
-        onPointerMove={(e) => {
-          const r = e.currentTarget.getBoundingClientRect()
-          setTilt({
-            x: ((e.clientY - r.top) / r.height - 0.5) * -10,
-            y: ((e.clientX - r.left) / r.width - 0.5) * 12,
-          })
+      <input
+        className="link-input"
+        type="url"
+        placeholder="paste a YouTube link"
+        aria-label="YouTube link"
+        aria-invalid={linkError}
+        onChange={(e) => {
+          const v = e.currentTarget.value
+          if (!v) setLinkError(false)
+          else if (parseYouTubeId(v)) {
+            tryLink(v)
+            e.currentTarget.value = ''
+          }
         }}
-        onPointerLeave={() => setTilt({ x: 0, y: 0 })}
-      >
-        <div
-          className="tape"
-          style={{
-            transform: `rotateX(${POSE.x + tilt.x}deg) rotateY(${POSE.y + tilt.y}deg) rotateZ(${POSE.z}deg)`,
-          }}
-        >
-          {/* edge: outlines stacked into the depth */}
-          {Array.from({ length: LAYERS }, (_, i) => (
-            <svg
-              key={i}
-              className="layer"
-              viewBox={`-2 -2 ${W + 4} ${H + 4}`}
-              style={{ transform: `translateZ(${-(i + 1) * LAYER_GAP}px)` }}
-              aria-hidden
-            >
-              <rect
-                x={0}
-                y={0}
-                width={W}
-                height={H}
-                rx={12}
-                fill="var(--edge)"
-                stroke="var(--ink)"
-                strokeWidth={i === LAYERS - 1 ? 1.6 : 1}
-                strokeOpacity={i === LAYERS - 1 ? 1 : i % 3 === 0 ? 0.35 : 0.12}
-              />
-            </svg>
-          ))}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter') return
+          if (tryLink(e.currentTarget.value)) e.currentTarget.value = ''
+        }}
+      />
 
-          {/* face */}
+      <div className="stage">
           <svg
-            className="layer cursor-pointer"
-            viewBox={`-2 -2 ${W + 4} ${H + 4}`}
+            className="cassette cursor-pointer"
+            viewBox={`-1 -1 ${W + 2} ${H + EDGE + 2}`}
             fill="none"
             stroke="var(--ink)"
             strokeWidth={1.4}
@@ -240,13 +368,28 @@ export function CassettePlayer() {
             aria-label="Cassette tape — click to load a track"
           >
             <defs>
+              <linearGradient id="edge-shade" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stopColor="var(--edge-light)" />
+                <stop offset="1" stopColor="var(--edge-dark)" />
+              </linearGradient>
               <clipPath id="tape-window">
                 <rect x={TAPE_WIN.x} y={TAPE_WIN.y} width={TAPE_WIN.w} height={TAPE_WIN.h} rx={2} />
               </clipPath>
             </defs>
 
+            {/* thickness: the shell's outline pushed down, so its corners stay round */}
+            <rect x={0.9} y={0.9 + EDGE} width={W - 1.8} height={H - 1.8} rx={7} fill="url(#edge-shade)" strokeWidth={1.6} />
+            <line x1={10} x2={84} y1={H + EDGE / 2} y2={H + EDGE / 2} stroke="var(--seam)" strokeWidth={0.8} />
+            <line x1={316} x2={W - 10} y1={H + EDGE / 2} y2={H + EDGE / 2} stroke="var(--seam)" strokeWidth={0.8} />
+            {EDGE_OPENINGS.map(([x, w]) => (
+              <g key={x}>
+                <rect x={x} y={H + 2.5} width={w} height={EDGE - 6} rx={1.2} fill="var(--edge-deep)" strokeWidth={0.9} />
+                <line x1={x + 1.5} x2={x + w - 1.5} y1={H + EDGE / 2 - 1} y2={H + EDGE / 2 - 1} stroke="var(--tape-line)" strokeWidth={1.3} />
+              </g>
+            ))}
+
             {/* shell */}
-            <rect x={0} y={0} width={W} height={H} rx={10} fill="var(--paper)" strokeWidth={1.8} />
+            <rect x={0.9} y={0.9} width={W - 1.8} height={H - 1.8} rx={7} fill="var(--paper)" strokeWidth={1.8} />
             <rect x={8} y={8} width={W - 16} height={H - 16} rx={6} strokeWidth={0.8} />
             <Screw x={17} y={17} />
             <Screw x={383} y={17} />
@@ -266,8 +409,11 @@ export function CassettePlayer() {
                 {title.length > 40 ? `${title.slice(0, 39)}…` : title}
               </text>
             )}
-            <line x1={38} x2={362} y1={156} y2={156} strokeWidth={0.7} />
-            <line x1={38} x2={362} y1={161} y2={161} strokeWidth={0.7} />
+
+            {/* hearts */}
+            {[0, 1, 2].map((i) => (
+              <Heart key={i} x={W / 2 - 27 + i * 19} y={151} cell={1.45} />
+            ))}
 
             {/* reel strip: two identical hubs, tape window between */}
             <rect x={72} y={78} width={256} height={64} rx={32} fill="var(--paper)" strokeWidth={1.3} />
@@ -286,13 +432,13 @@ export function CassettePlayer() {
 
             {/* head opening */}
             <path d="M84 256 L102 194 L298 194 L316 256" fill="var(--paper)" strokeWidth={1.4} />
+            <line x1={84} x2={316} y1={H - 0.9} y2={H - 0.9} strokeWidth={1.8} />
             <Screw x={200} y={207} />
             <circle cx={130} cy={234} r={6.5} strokeWidth={1.2} />
             <circle cx={270} cy={234} r={6.5} strokeWidth={1.2} />
             <rect x={153} y={228} width={10} height={10} rx={1.5} strokeWidth={1.2} />
             <rect x={237} y={228} width={10} height={10} rx={1.5} strokeWidth={1.2} />
             <rect x={185} y={224} width={30} height={13} rx={2} strokeWidth={1.2} />
-            <line x1={94} x2={306} y1={249} y2={249} strokeWidth={1} />
 
             {/* tape guide rollers either side of the opening */}
             {[50, 350].map((cx) => (
@@ -303,25 +449,46 @@ export function CassettePlayer() {
               </g>
             ))}
           </svg>
-        </div>
+        <div className="floor-shadow" aria-hidden />
       </div>
 
-      <div className="flex items-center gap-3">
+      {/* piano-key transport, like a deck */}
+      <div className="deck">
         {buttons.map((b) => (
           <button
             key={b.label}
             type="button"
-            className={`sketch-btn ${b.on ? 'is-on' : ''}`}
+            className={`key ${b.on ? 'is-down' : ''}`}
             onClick={b.act}
             aria-label={b.label}
             title={b.label}
           >
-            <svg viewBox="0 0 24 24" width={20} height={20} aria-hidden>
+            <svg viewBox="0 0 24 24" width={18} height={18} aria-hidden>
               <path d={ICONS[b.id]} fill="currentColor" />
             </svg>
           </button>
         ))}
+
+        {/* volume: down, level meter, up */}
+        <button type="button" className="key key-small" onClick={() => nudgeVolume(-1)} aria-label="Volume down" title="Volume down">
+          <svg viewBox="0 0 24 24" width={18} height={18} aria-hidden>
+            <path d={ICONS['vol-down']} fill="currentColor" />
+          </svg>
+        </button>
+        <div className="vol-meter" role="meter" aria-label="Volume" aria-valuemin={0} aria-valuemax={10} aria-valuenow={volume}>
+          {Array.from({ length: 10 }, (_, i) => (
+            <span key={i} className={i < volume ? 'on' : ''} style={{ height: `${8 + i * 2.2}px` }} />
+          ))}
+        </div>
+        <button type="button" className="key key-small" onClick={() => nudgeVolume(1)} aria-label="Volume up" title="Volume up">
+          <svg viewBox="0 0 24 24" width={18} height={18} aria-hidden>
+            <path d={ICONS['vol-up']} fill="currentColor" />
+          </svg>
+        </button>
       </div>
+
+      {/* YouTube player runs off-screen: audio only */}
+      <div className="yt-offscreen" ref={ytHost} aria-hidden />
 
       <input
         ref={fileRef}

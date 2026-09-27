@@ -3,7 +3,16 @@
 :root {
   --paper: #fbfbf9;
   --ink: #141414;
-  --edge: #dcdbd6;
+  --seam: #b9b8b2;
+  --edge-light: #ebeae5;
+  --edge-dark: #d3d2cc;
+  --deck: #efeeea;
+  --heart: #e3262e;
+  --heart-shade: #a3151b;
+  --tape-line: #4a4642;
+  --edge-deep: #c9c8c2;
+  --key-top: #f1f0ec;
+  --key-side: #cfcec8;
   --tape: #d8d7d2;
   --tape-bg: #f0efeb;
 }
@@ -24,26 +33,27 @@ body {
   color: var(--ink);
 }
 
-/* 3D stage for the cassette */
 .stage {
-  perspective: 1400px;
-  padding: 24px;
-}
-
-.tape {
   position: relative;
-  width: min(560px, 82vw);
-  aspect-ratio: 404 / 260;
-  transform-style: preserve-3d;
-  transition: transform 400ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  padding: 48px 24px;
 }
 
-.layer {
+.cassette {
+  display: block;
+  width: min(560px, 82vw);
+  height: auto;
+}
+
+.floor-shadow {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
+  left: 14%;
+  right: 14%;
+  bottom: 14px;
+  height: 36px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(0 0 0 / 0.22), transparent);
+  filter: blur(6px);
+  pointer-events: none;
 }
 
 .hand {
@@ -61,33 +71,119 @@ body {
   stroke: none;
 }
 
-/* transport buttons */
-.sketch-btn {
-  display: grid;
-  place-items: center;
-  width: 52px;
-  height: 44px;
-  color: var(--ink);
-  background: var(--paper);
-  border: 1.8px solid var(--ink);
-  border-radius: 6px;
-  box-shadow: 0 3px 0 var(--ink);
-  cursor: pointer;
-  transition: transform 80ms ease, box-shadow 80ms ease;
+/* transport: piano keys set into a recessed housing; latched keys stay down */
+.deck {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px 16px 12px;
+  background: var(--deck);
+  border: 1.5px solid var(--ink);
+  border-radius: 14px;
+  box-shadow:
+    inset 0 2px 4px rgb(0 0 0 / 0.08),
+    0 1px 0 rgb(255 255 255 / 0.9),
+    0 12px 24px -16px rgb(0 0 0 / 0.35);
 }
 
-.sketch-btn:active,
-.sketch-btn.is-on {
-  transform: translateY(3px);
+/* flat keys with a hard offset shadow; hover leans in, pressed sits flat */
+.key {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 50px;
+  color: var(--ink);
+  background: #ffffff;
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  box-shadow: 4px 4px 0 var(--ink);
+  cursor: pointer;
+  transition:
+    transform 90ms ease,
+    box-shadow 90ms ease,
+    background 90ms ease;
+}
+
+.key:hover {
+  background: #efefec;
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+.key:active,
+.key.is-down {
+  background: #e6e5e1;
+  transform: translate(4px, 4px);
   box-shadow: 0 0 0 var(--ink);
 }
 
-.sketch-btn.is-on {
-  color: var(--paper);
+.key-small {
+  width: 46px;
+}
+
+/* ten bars, rising like a volume wedge */
+.vol-meter {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 30px;
+  padding: 0 6px;
+  align-self: center;
+}
+
+.vol-meter span {
+  width: 5px;
+  border: 1.2px solid var(--ink);
+  border-radius: 1px;
+  background: var(--paper);
+  transition: background 90ms ease;
+}
+
+.vol-meter span.on {
   background: var(--ink);
 }
 
-.sketch-btn:focus-visible {
+.key:focus-visible {
+  outline: 2px dashed var(--ink);
+  outline-offset: 5px;
+}
+
+/* link input, drawn like the deck */
+.link-input {
+  width: min(324px, 100%);
+  height: 42px;
+  margin-bottom: -40px;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 14px;
+  text-align: center;
+  color: var(--ink);
+  background: var(--deck);
+  border: 1.5px solid var(--ink);
+  border-radius: 10px;
+  box-shadow: inset 0 2px 0 rgb(0 0 0 / 0.06);
+}
+
+.link-input::placeholder {
+  color: #8a8a86;
+}
+
+.link-input:focus-visible {
   outline: 2px dashed var(--ink);
   outline-offset: 4px;
 }
+
+.link-input[aria-invalid='true'] {
+  border-color: var(--heart);
+}
+
+/* the YouTube player is kept off-screen; only its audio is used */
+.yt-offscreen {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 356px;
+  height: 200px;
+  pointer-events: none;
+}
+
